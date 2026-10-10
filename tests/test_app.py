@@ -88,5 +88,42 @@ def test_invalid_or_oversized_smiles_returns_400(client, smiles):
 
 def test_missing_model_returns_503(monkeypatch):
     monkeypatch.setattr(webapp, "model", None)
-    res = webapp.app.test_client().post("/predict", json={"smiles": "CCO"})
-    assert res.status_code == 503
+    monkeypatch.setattr(webapp, "load_model", lambda: None)  # keep the retry from finding a real checkpoint
+    monkeypatch.setattr(webapp, "_last_attempt", float("-inf"))
+    client = webapp.app.test_client()
+    res = client.post("/predict", json={"smiles": "CCO"})
+    assert res.status_code == 503 and "error" in res.get_json()
+    assert "Traceback" not in res.get_data(as_text=True)
+    ready = client.get("/ready")
+    assert ready.status_code == 503 and ready.get_json()["ready"] is False
+
+
+def test_model_load_is_retried_after_failure(monkeypatch):
+    net = BaseModel(num_outputs=1, labels=["SR-ATAD5"], lr=0.00001)
+    net.eval()
+    monkeypatch.setattr(webapp, "model", None)
+    monkeypatch.setattr(webapp, "load_model", lambda: net)
+    monkeypatch.setattr(webapp, "_last_attempt", float("-inf"))
+    client = webapp.app.test_client()
+    assert client.get("/ready").status_code == 200
+    assert client.post("/predict", json={"smiles": "CCO"}).status_code == 200
+
+
+def test_ready_ok_when_model_loaded(client):
+    res = client.get("/ready")
+    assert res.status_code == 200 and res.get_json() == {"ready": True, "model_loaded": True}
+
+
+def test_unhandled_errors_are_generic_json(client, monkeypatch):
+    def boom(_):
+        raise RuntimeError("secret internal detail /srv/app.py line 42")
+    monkeypatch.setattr(webapp, "convert_name_to_smiles", boom)
+    res = client.post("/predict", json={"chemical_name": "aspirin"})
+    text = res.get_data(as_text=True)
+    assert res.status_code == 500 and res.get_json() == {"error": "Internal server error"}
+    assert "secret internal detail" not in text and "Traceback" not in text
+
+
+def test_unknown_route_is_json_404(client):
+    res = client.get("/nope")
+    assert res.status_code == 404 and res.get_json() == {"error": "Not found"}

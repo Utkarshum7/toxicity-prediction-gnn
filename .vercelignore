@@ -1,0 +1,28 @@
+# What `vercel deploy` uploads. Everything not listed here IS uploaded, including
+# models/model.pth (the trained checkpoint, which is deliberately not in Git).
+
+# Local environments and caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.claude/
+.vercel/
+
+# Not needed at runtime
+.git/
+.github/
+tests/
+legacy/
+datasets/
+docs/
+*.md
+pytest.ini
+requirements-dev.txt
+requirements-train.txt
+train.py
+predict.py
+
+# Local credentials/config (never upload)
+.env*

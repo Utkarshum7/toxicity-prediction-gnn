@@ -1,33 +1,54 @@
 """Flask web app: chemical name (or SMILES) -> ATAD5 stress-response score."""
 import logging
 import os
+import threading
+import time
 
 import torch
 from flask import Flask, jsonify, render_template, request
 
+from src.checkpoint import resolve_checkpoint
 from src.model import BaseModel
 from src.process import parse_smiles
 from src.pubchem import convert_name_to_smiles
 
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+# Static assets live in public/ so Vercel's CDN serves them; Flask serves the same folder locally.
+app = Flask(__name__, static_folder="public/static", static_url_path="/static")
+
+RETRY_AFTER_SECONDS = 15  # minimum gap between checkpoint load attempts after a failure
 
 
 def load_model():
     """Load the trained checkpoint; return None (and log why) if unavailable."""
     try:
         net = BaseModel(num_outputs=1, labels=["SR-ATAD5"], lr=0.00001)
-        net.load()
+        net.load(resolve_checkpoint())
         net.eval()
         logger.info("Model initialized successfully")
         return net
-    except Exception as exc:
+    except Exception as exc:  # message only: never log URLs or tracebacks with secrets
         logger.warning("Model not loaded: %s", exc)
         return None
 
 
 model = load_model()
+_load_lock = threading.Lock()
+_last_attempt = time.monotonic()
+
+
+def ensure_model():
+    """Return the model, retrying a failed load (rate-limited) so a transient error on a
+    serverless instance does not leave it permanently without a model."""
+    global model, _last_attempt
+    if model is not None:
+        return model
+    with _load_lock:
+        if model is None and time.monotonic() - _last_attempt >= RETRY_AFTER_SECONDS:
+            _last_attempt = time.monotonic()
+            model = load_model()
+    return model
 
 
 def predict_smiles(smiles):
@@ -44,14 +65,36 @@ def home():
 
 @app.route("/health")
 def health():
+    """Liveness: the process is up. Reports whether the checkpoint is loaded."""
     return jsonify({"model_loaded": model is not None})
+
+
+@app.route("/ready")
+def ready():
+    """Readiness: 200 only when real inference is possible (checkpoint loaded)."""
+    loaded = ensure_model() is not None
+    return jsonify({"ready": loaded, "model_loaded": loaded}), (200 if loaded else 503)
+
+
+@app.errorhandler(404)
+def not_found(_):
+    return jsonify({"error": "Not found"}), 404
+
+
+@app.errorhandler(Exception)
+def unhandled(exc):
+    # Never expose stack traces or internals; details go to the server log only.
+    if hasattr(exc, "code") and isinstance(exc.code, int) and exc.code < 500:
+        return jsonify({"error": getattr(exc, "description", "Request error")}), exc.code
+    logger.exception("Unhandled error")
+    return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    if model is None:
-        return jsonify({"error": "Model checkpoint not loaded. Train one with `python train.py` "
-                                 "or place it at models/model.pth."}), 503
+    if ensure_model() is None:
+        return jsonify({"error": "The model checkpoint is not available on the server right now. "
+                                 "Please try again shortly."}), 503
 
     data = request.get_json(silent=True) or {}
     chemical_name = str(data.get("chemical_name") or "").strip()

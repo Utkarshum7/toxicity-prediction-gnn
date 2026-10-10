@@ -1,12 +1,16 @@
-# Direct dependencies, pinned to the versions this project was verified with
-# (Windows 11, Python 3.12.1). Transitive dependencies (scipy, tqdm, jinja2, ...)
-# are resolved by pip. See README for platform-specific PyTorch install notes.
-torch==2.2.2
+# Runtime dependencies for the web app / inference, pinned to the versions verified on
+# Windows 11 + Python 3.12.1. Transitive dependencies are resolved by the installer.
+# Training-only packages (pandas, matplotlib) are in requirements-train.txt.
+#
+# PyTorch: on Linux the default PyPI wheel pulls in GBs of CUDA libraries, which cannot fit in
+# a serverless function. The CPU-only 2.2.2 wheels are referenced directly (hash-pinned) for
+# Python 3.11/3.12. Everywhere else the normal PyPI wheel (CPU-only on Windows/macOS) is used.
+torch @ https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp312-cp312-linux_x86_64.whl#sha256=431a747b5a880cf8e1fb6d58db6bfafa6768cbec76517d046854537c03323edf ; sys_platform == "linux" and python_version == "3.12"
+torch @ https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp311-cp311-linux_x86_64.whl#sha256=90089cae572672fb449c8ff1dc1b29daaffa117bf97ede7463dcd2fd1b991e4c ; sys_platform == "linux" and python_version == "3.11"
+torch==2.2.2 ; sys_platform != "linux" or python_version not in "3.11 3.12"
 torch_geometric==2.5.3
 rdkit==2023.9.5
 numpy==1.26.4
-pandas==2.2.2
-matplotlib==3.8.4
 flask==3.1.2
 pubchempy==1.0.5
 requests==2.31.0

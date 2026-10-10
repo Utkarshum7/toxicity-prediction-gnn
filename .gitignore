@@ -39,3 +39,6 @@ Thumbs.db
 #  - datasets/dataset.csv: byte-different but content-identical copy of datasets/tox21.csv
 legacy/
 datasets/dataset.csv
+
+.vercel
+.env*

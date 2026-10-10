@@ -21,10 +21,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements*.txt
 
-      # CPU-only PyTorch wheel (the default Linux wheel pulls in GBs of CUDA libraries).
-      - name: Install PyTorch (CPU)
-        run: pip install torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-
+      # requirements.txt selects the hash-pinned CPU-only PyTorch wheel on Linux.
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 

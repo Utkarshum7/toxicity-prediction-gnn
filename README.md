@@ -9,6 +9,8 @@
 
 A small graph-neural-network model that scores a molecule's likelihood of triggering the **ATAD5 DNA-damage stress response** (Tox21 assay `SR-ATAD5`), plus a Flask web app that accepts a chemical *name*, resolves it through PubChem, and shows the model score next to PubChem's hazard information.
 
+**Live demo:** <https://moleculeiq.vercel.app> (Vercel; see [Deployment](#deployment-vercel) for how it runs and its limits)
+
 > **Research / educational use only.** Outputs are uncalibrated model scores from a small, minimally evaluated model. They are **not** a substitute for laboratory validation, regulatory toxicology, or professional medical advice. See [Limitations](#limitations-and-responsible-use).
 
 ## Table of contents
@@ -20,12 +22,13 @@ A small graph-neural-network model that scores a molecule's likelihood of trigge
 5. [Installation (Windows)](#installation-windows)
 6. [Model checkpoint](#model-checkpoint)
 7. [Usage](#usage)
-8. [Testing](#testing)
-9. [Project layout](#project-layout)
-10. [Limitations and responsible use](#limitations-and-responsible-use)
-11. [Known issues](#known-issues)
-12. [Future improvements](#future-improvements)
-13. [License and acknowledgments](#license-and-acknowledgments)
+8. [Deployment (Vercel)](#deployment-vercel)
+9. [Testing](#testing)
+10. [Project layout](#project-layout)
+11. [Limitations and responsible use](#limitations-and-responsible-use)
+12. [Known issues](#known-issues)
+13. [Future improvements](#future-improvements)
+14. [License and acknowledgments](#license-and-acknowledgments)
 
 ## Overview
 
@@ -100,13 +103,13 @@ pip install -r requirements.txt
 Notes on special dependencies:
 
 - **PyTorch 2.2.2 / PyG 2.5.3** are pinned together. PyG's `GCNConv` works without the optional `torch-scatter` / `torch-sparse` extras, so no special wheels are needed.
-- On **Windows/macOS** the default PyPI `torch` wheel is CPU-only. On **Linux** the default wheel pulls in large CUDA libraries; for a CPU-only install run first:
-  `pip install torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu`
+- On **Linux** (Python 3.11/3.12), `requirements.txt` references the CPU-only PyTorch 2.2.2 wheel directly, pinned by SHA-256 (the default Linux wheel pulls in gigabytes of CUDA libraries). On Windows/macOS the PyPI wheel is already CPU-only and is used as-is.
+- `requirements.txt` holds only what the web app and inference need. Training additionally needs `pandas` and `matplotlib`: `pip install -r requirements-train.txt`.
 - `numpy` is pinned to `1.26.4` because `torch 2.2.2` is not built against NumPy 2.
 - RDKit is installed from PyPI (`rdkit==2023.9.5`); no conda is required.
 - The web app needs internet access for PubChem lookups (the UI itself loads no external scripts, fonts or styles).
 
-For development / tests: `pip install -r requirements-dev.txt`.
+For development / tests (includes the training packages and pytest): `pip install -r requirements-dev.txt`.
 
 ## Model checkpoint
 
@@ -161,7 +164,7 @@ Open <http://127.0.0.1:5000>. The **MoleculeIQ** dashboard accepts either a chem
 - **PubChem information** (each card is tagged with its source): CID and SMILES with copy buttons, molecular profile (formula, weight, IUPAC name, XLogP, exact mass, TPSA, H-bond and rotatable-bond counts), toxicity summary, health hazards, GHS signal word(s) and hazard statements, and a hazards summary. Sections PubChem has no data for show an empty state.
 - **Model details**: assay, architecture, input constraints and limitations.
 
-SMILES input skips PubChem, so only the model output is shown. The UI is plain HTML/CSS/JS (`templates/index.html`, `static/`); no build step, no external fonts or chart libraries. All server- and PubChem-provided text is inserted with `textContent` (a test guards against HTML-injection sinks). Not shown: GHS pictogram images.
+SMILES input skips PubChem, so only the model output is shown. The UI is plain HTML/CSS/JS (`templates/index.html`, `public/static/`); no build step, no external fonts or chart libraries. All server- and PubChem-provided text is inserted with `textContent` (a test guards against HTML-injection sinks). Not shown: GHS pictogram images.
 
 Debug mode is off by default; enable with `$env:FLASK_DEBUG = "1"`.
 
@@ -176,6 +179,46 @@ curl.exe -X POST http://127.0.0.1:5000/predict -H "Content-Type: application/jso
 | `GET /` | Web UI |
 | `GET /health` | `{"model_loaded": true/false}` |
 | `POST /predict` | Body `{"chemical_name": "..."}` or `{"smiles": "..."}`. Returns `raw_output` (unscaled sigmoid output, 0-1), `prediction` (`raw_output` x 100, kept for compatibility), `smiles`, `message`, and `toxicity_data` (PubChem, only for name lookups; includes a `compound` object with `cid` and computed properties). Errors: 400 invalid input, 503 no checkpoint |
+
+## Deployment (Vercel)
+
+Live at <https://moleculeiq.vercel.app> (Vercel project `moleculeiq`, region `iad1`).
+
+**Architecture.** One Flask function on Vercel's Python 3.12 runtime (Fluid compute) serves the page, `/predict`, `/health` and `/ready`. Static assets in `public/static/` are served by Vercel's CDN. The function performs real GNN inference with the trained checkpoint and calls PubChem outbound. There is no separate inference service and no mock output.
+
+**Checkpoint delivery.** `models/model.pth` is not in Git. It is bundled into the function when deploying with the Vercel CLI from a machine that has it (`.vercelignore` keeps it; it is never served as a static file). At startup `src/checkpoint.py` verifies its SHA-256 against `TOX_MODEL_SHA256` and refuses to load a mismatching file; the model is loaded once per instance, not per request. If the file is absent, an https `TOX_MODEL_URL` can be configured instead: it is downloaded once into `/tmp` (the only writable location), verified, and cached. A failed load is retried on later requests (rate-limited), and `/predict` answers `503` while no checkpoint is available.
+
+**Environment variables**
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VERCEL_SUPPORT_LARGE_FUNCTIONS` | yes, value `1` | The dependencies (CPU PyTorch + PyG + RDKit + SciPy/scikit-learn) unpack to about 1.07 GB, above the 500 MB Python limit; this enables Vercel's *Large Functions* (beta, up to 5 GB). **Store it as a plain (non-sensitive) variable**; as a sensitive variable the build did not honour it. |
+| `TOX_MODEL_SHA256` | recommended | SHA-256 of the checkpoint; mismatching files are rejected. Not a secret. |
+| `TOX_MODEL_URL` | optional | https URL to download the checkpoint when it is not bundled. Treat as a secret if it is signed. |
+| `TOX_MODEL_PATH` | optional | Alternative checkpoint path. |
+| `FLASK_DEBUG` | local only | `1` enables Flask debug mode. Never set on Vercel. |
+
+**Deploying**
+
+```powershell
+npm i -g vercel
+vercel login
+vercel link --project moleculeiq
+vercel env add VERCEL_SUPPORT_LARGE_FUNCTIONS production --no-sensitive --value 1
+vercel env add TOX_MODEL_SHA256 production --no-sensitive --value <sha256-of-models/model.pth>
+vercel deploy --prod          # run from a checkout that contains models/model.pth
+```
+
+Use `--value` (not a pipe) when setting variables from PowerShell: piping prepends a byte-order mark to the value (the code now tolerates that, but avoid it). The project is intentionally **not** connected to Git: a Git-triggered build would not contain the untracked checkpoint. To enable Git deployments, host the checkpoint at an https URL and set `TOX_MODEL_URL` as well.
+
+**Limitations of this deployment**
+
+- *Large Functions is a Vercel beta feature*; the deployment depends on it because of the PyTorch footprint.
+- Hobby plan limits apply: 2 GB memory / 1 vCPU, 300 s maximum duration (the function is configured for 120 s; PubChem lookups normally take 1-2 s).
+- A request that lands on a fresh instance (after idle time or scale-out) pays for importing PyTorch, PyG and RDKit and for verifying and loading the checkpoint. Observed on the live site: about 5.2-5.5 s (three observations), versus about 0.4 s for warm requests. These are spot measurements, not a benchmark.
+- Memory: the process uses roughly 300 MB resident after loading the model (measured locally on Windows; not measured inside Vercel), well under the 2 GB Hobby limit.
+- The public endpoints have no authentication or rate limiting. Anyone can call `/predict`, and every name lookup makes outbound PubChem requests.
+- Results depend on PubChem availability; if PubChem fails or is slow, name lookups return an error or empty hazard sections while SMILES input keeps working.
 
 ## Testing
 
@@ -196,8 +239,10 @@ src/
   model.py          BaseModel (GCN + MLP), save/load
   process.py        SMILES -> node features / edge index, validation
   pubchem.py        Name -> SMILES and PubChem hazard text
+  checkpoint.py     Locate / verify (SHA-256) / optionally download the checkpoint
 templates/          Web UI page (index.html)
-static/             UI stylesheet and script (css/app.css, js/app.js)
+public/static/      UI stylesheet and script (css/app.css, js/app.js); served by Vercel's CDN, and by Flask locally
+vercel.json         Vercel configuration (Flask preset, function duration)
 datasets/tox21.csv  Tox21 data (MoleculeNet copy)
 models/             Checkpoints (git-ignored)
 tests/              pytest suite

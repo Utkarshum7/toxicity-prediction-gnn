@@ -30,6 +30,19 @@ def test_hazard_codes_extracted_from_ghs(monkeypatch):
     assert "Warning" in info["ghs_classification"]
 
 
+def test_compound_profile_included(monkeypatch):
+    props = {"PropertyTable": {"Properties": [{"CID": 2244, "MolecularFormula": "C9H8O4", "XLogP": 1.2, "TPSA": None}]}}
+    monkeypatch.setattr(pubchem, "_fetch_json", lambda url: props if "/property/" in url else None)
+    compound = pubchem.get_pubchem_data(2244)["compound"]
+    assert compound == {"cid": 2244, "MolecularFormula": "C9H8O4", "XLogP": 1.2}  # None values dropped
+
+
+def test_compound_is_cid_only_when_properties_unavailable(monkeypatch):
+    monkeypatch.setattr(pubchem, "_fetch_json", lambda url: None)
+    info = pubchem.get_pubchem_data(7)
+    assert info["compound"] == {"cid": 7} and info["safety_summary"] is None
+
+
 def test_property_fallback_when_nothing_found(monkeypatch):
     props = {"PropertyTable": {"Properties": [{"MolecularFormula": "C2H6O"}]}}
     monkeypatch.setattr(pubchem, "_fetch_json", lambda url: props if "/property/" in url else None)

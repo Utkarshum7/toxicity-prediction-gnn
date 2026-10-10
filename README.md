@@ -104,7 +104,7 @@ Notes on special dependencies:
   `pip install torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu`
 - `numpy` is pinned to `1.26.4` because `torch 2.2.2` is not built against NumPy 2.
 - RDKit is installed from PyPI (`rdkit==2023.9.5`); no conda is required.
-- The web app needs internet access (PubChem REST API and the Plotly CDN).
+- The web app needs internet access for PubChem lookups (the UI itself loads no external scripts, fonts or styles).
 
 For development / tests: `pip install -r requirements-dev.txt`.
 
@@ -155,7 +155,15 @@ Invalid input gives a message instead of a traceback, e.g. `not_a_smiles  ERROR:
 python app.py
 ```
 
-Open <http://127.0.0.1:5000>, enter a chemical name (e.g. `aspirin`) and press **Analyze Chemical**. The app resolves the name via PubChem, scores the SMILES, draws a bar chart, and lists PubChem toxicity summary, health hazards, GHS classification (with H-codes) and a hazard summary. Debug mode is off by default; enable with `$env:FLASK_DEBUG = "1"`.
+Open <http://127.0.0.1:5000>. The **MoleculeIQ** dashboard accepts either a chemical name (resolved through PubChem, e.g. `aspirin`) or a SMILES string. For a name lookup it shows:
+
+- **Model output**: the raw network output for `SR-ATAD5` on a 0-1 scale (arc gauge + number), explicitly labelled *uncalibrated*. The gauge fill is proportional to the raw value; nothing is rescaled, clamped or colour-coded as "safe/unsafe".
+- **PubChem information** (each card is tagged with its source): CID and SMILES with copy buttons, molecular profile (formula, weight, IUPAC name, XLogP, exact mass, TPSA, H-bond and rotatable-bond counts), toxicity summary, health hazards, GHS signal word(s) and hazard statements, and a hazards summary. Sections PubChem has no data for show an empty state.
+- **Model details**: assay, architecture, input constraints and limitations.
+
+SMILES input skips PubChem, so only the model output is shown. The UI is plain HTML/CSS/JS (`templates/index.html`, `static/`); no build step, no external fonts or chart libraries. All server- and PubChem-provided text is inserted with `textContent` (a test guards against HTML-injection sinks). Not shown: GHS pictogram images.
+
+Debug mode is off by default; enable with `$env:FLASK_DEBUG = "1"`.
 
 JSON API:
 
@@ -167,7 +175,7 @@ curl.exe -X POST http://127.0.0.1:5000/predict -H "Content-Type: application/jso
 |---|---|
 | `GET /` | Web UI |
 | `GET /health` | `{"model_loaded": true/false}` |
-| `POST /predict` | Body `{"chemical_name": "..."}` or `{"smiles": "..."}`. Returns `prediction` (0-100), `smiles`, `message`, and `toxicity_data` (PubChem, only for name lookups). Errors: 400 invalid input, 503 no checkpoint |
+| `POST /predict` | Body `{"chemical_name": "..."}` or `{"smiles": "..."}`. Returns `raw_output` (unscaled sigmoid output, 0-1), `prediction` (`raw_output` x 100, kept for compatibility), `smiles`, `message`, and `toxicity_data` (PubChem, only for name lookups; includes a `compound` object with `cid` and computed properties). Errors: 400 invalid input, 503 no checkpoint |
 
 ## Testing
 
@@ -188,7 +196,8 @@ src/
   model.py          BaseModel (GCN + MLP), save/load
   process.py        SMILES -> node features / edge index, validation
   pubchem.py        Name -> SMILES and PubChem hazard text
-templates/          Web UI (index.html)
+templates/          Web UI page (index.html)
+static/             UI stylesheet and script (css/app.css, js/app.js)
 datasets/tox21.csv  Tox21 data (MoleculeNet copy)
 models/             Checkpoints (git-ignored)
 tests/              pytest suite

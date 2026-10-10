@@ -31,10 +31,10 @@ model = load_model()
 
 
 def predict_smiles(smiles):
-    """Return the model score (0-100) for a SMILES string; raises ValueError if invalid."""
+    """Return the raw model output (sigmoid, 0-1) for a SMILES string; raises ValueError if invalid."""
     parse_smiles(smiles, max_atoms=model.max_atoms)
     with torch.no_grad():
-        return float(model.forward_smiles(smiles).item() * 100)
+        return float(model.forward_smiles(smiles).item())
 
 
 @app.route("/")
@@ -66,7 +66,8 @@ def predict():
             return jsonify({"error": f'Could not convert "{chemical_name}" to SMILES notation'}), 400
 
     try:
-        prediction = predict_smiles(smiles)
+        raw_output = predict_smiles(smiles)
+        prediction = raw_output * 100
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception:
@@ -75,7 +76,8 @@ def predict():
 
     return jsonify({
         "success": True,
-        "prediction": prediction,
+        "prediction": prediction,   # raw_output * 100, kept for backward compatibility
+        "raw_output": raw_output,   # unscaled sigmoid output of the network
         "smiles": smiles,
         "plot": {"x": ["ATAD5 Stress Response"], "y": [prediction], "type": "bar"},
         "chemical_name": chemical_name or smiles,

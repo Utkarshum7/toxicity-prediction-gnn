@@ -8,9 +8,13 @@ import requests
 logger = logging.getLogger(__name__)
 
 PUG_VIEW = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON?heading={heading}"
+PROFILE_FIELDS = (
+    "MolecularFormula", "MolecularWeight", "IUPACName", "XLogP", "ExactMass",
+    "TPSA", "HBondDonorCount", "HBondAcceptorCount", "RotatableBondCount",
+)
 PUG_PROPERTY = (
     "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}"
-    "/property/MolecularFormula,IUPACName,XLogP,ExactMass/JSON"
+    "/property/" + ",".join(PROFILE_FIELDS) + "/JSON"
 )
 TIMEOUT = 10        # seconds per PubChem request
 MAX_ITEMS = 10      # strings kept per category (PubChem records can be very large)
@@ -44,15 +48,27 @@ def _heading_strings(cid, heading):
     return [s[:MAX_CHARS] for s in unique[:MAX_ITEMS]]
 
 
+def _compound_profile(cid):
+    """PubChem computed properties for a CID (only those PubChem returned)."""
+    data = _fetch_json(PUG_PROPERTY.format(cid=cid))
+    props = ((data or {}).get("PropertyTable", {}).get("Properties") or [{}])[0]
+    return {key: props[key] for key in PROFILE_FIELDS if props.get(key) is not None}
+
+
 def get_pubchem_data(cid):
-    """Collect GHS / hazard / toxicity text for a compound; never raises."""
+    """Collect GHS / hazard / toxicity text and basic properties for a compound; never raises."""
     info = {
         "toxicity": [],
         "health_effects": [],
         "safety_summary": None,
         "ghs_classification": [],
         "hazard_codes": [],
+        "compound": {"cid": cid},
     }
+    try:
+        info["compound"].update(_compound_profile(cid))
+    except Exception:
+        logger.exception("Error fetching PubChem properties for CID %s", cid)
     try:
         info["toxicity"] = _heading_strings(cid, "Toxicity+Summary")
         info["health_effects"] = _heading_strings(cid, "Health+Hazards")
@@ -62,16 +78,15 @@ def get_pubchem_data(cid):
         if summary:
             info["safety_summary"] = summary[0]
 
-        if not any(info.values()):
-            data = _fetch_json(PUG_PROPERTY.format(cid=cid))
-            if data and data.get("PropertyTable", {}).get("Properties"):
-                props = data["PropertyTable"]["Properties"][0]
-                info["safety_summary"] = (
-                    f"Chemical Formula: {props.get('MolecularFormula', 'N/A')}\n"
-                    f"IUPAC Name: {props.get('IUPACName', 'N/A')}\n"
-                    f"LogP: {props.get('XLogP', 'N/A')} (measure of lipophilicity)\n"
-                    f"Exact Mass: {props.get('ExactMass', 'N/A')} g/mol"
-                )
+        hazard_text = {k: v for k, v in info.items() if k != "compound"}
+        props = info["compound"]
+        if not any(hazard_text.values()) and len(props) > 1:
+            info["safety_summary"] = (
+                f"Chemical Formula: {props.get('MolecularFormula', 'N/A')}\n"
+                f"IUPAC Name: {props.get('IUPACName', 'N/A')}\n"
+                f"LogP: {props.get('XLogP', 'N/A')} (measure of lipophilicity)\n"
+                f"Exact Mass: {props.get('ExactMass', 'N/A')} g/mol"
+            )
     except Exception:
         logger.exception("Error fetching PubChem data for CID %s", cid)
     return info

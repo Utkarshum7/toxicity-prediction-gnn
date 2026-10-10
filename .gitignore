@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets / local configuration
+.env
+.env.*
+*.pem
+*.key
+
+# IDEs / OS
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs, caches, generated output
+*.log
+*.png
+!docs/*.png
+
+# Model checkpoints: trained locally with `python train.py`; not versioned.
+# (models/.gitignore also ignores everything in that folder except itself.)
+*.pth
+*.pt
+
+# Local-only files kept on disk but not published:
+#  - legacy/: superseded app drafts (app2.py, app3.py), old UI mock-ups, the original interactive CLI
+#  - datasets/dataset.csv: byte-different but content-identical copy of datasets/tox21.csv
+legacy/
+datasets/dataset.csv

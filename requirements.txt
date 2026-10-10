@@ -1,0 +1,12 @@
+# Direct dependencies, pinned to the versions this project was verified with
+# (Windows 11, Python 3.12.1). Transitive dependencies (scipy, tqdm, jinja2, ...)
+# are resolved by pip. See README for platform-specific PyTorch install notes.
+torch==2.2.2
+torch_geometric==2.5.3
+rdkit==2023.9.5
+numpy==1.26.4
+pandas==2.2.2
+matplotlib==3.8.4
+flask==3.1.2
+pubchempy==1.0.5
+requests==2.31.0

@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chemical Analysis and Toxicity Prediction</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #34495e;
+            font-weight: bold;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .disclaimer {
+            background-color: #fff8e1;
+            border-left: 5px solid #ffc107;
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #5d4037;
+        }
+
+        .loading {
+            display: none;
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            text-align: center;
+            color: #666;
+        }
+        
+        .error {
+            color: #e74c3c;
+            padding: 15px;
+            margin: 15px 0;
+            background-color: #fde8e7;
+            border-radius: 4px;
+            display: none;
+            font-weight: bold;
+        }
+        
+        .success {
+            color: #27ae60;
+            padding: 15px;
+            margin: 15px 0;
+            background-color: #e8f7ef;
+            border-radius: 4px;
+            display: none;
+            font-weight: bold;
+        }
+
+        .result-card {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .prediction-value {
+            font-size: 24px;
+            color: #2c3e50;
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #e8f7ef;
+            border-radius: 8px;
+        }
+
+        .smiles-notation {
+            background-color: #edf2f7;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+
+        .toxicity-section {
+            margin-top: 20px;
+            background-color: #fff3e0;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 5px solid #ff9800;
+        }
+
+        .health-section {
+            margin-top: 20px;
+            background-color: #ffebee;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 5px solid #f44336;
+        }
+
+        .safety-section {
+            margin-top: 20px;
+            background-color: #e8f5e9;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 5px solid #4caf50;
+        }
+
+        .data-section {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 4px;
+        }
+
+        #plot {
+            margin-top: 30px;
+            height: 400px;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Chemical Analysis and Toxicity Prediction</h1>
+        <p class="disclaimer">Research/educational tool. The score is an uncalibrated output of a small GNN trained on
+            the Tox21 SR-ATAD5 assay. It is not a substitute for laboratory validation or professional advice.</p>
+
+        <div class="input-group">
+            <label for="chemical-name">Enter Chemical Name:</label>
+            <input type="text" id="chemical-name" placeholder="e.g., Aspirin">
+            <button onclick="predict()">Analyze Chemical</button>
+        </div>
+        
+        <div id="loading" class="loading">Analyzing chemical properties and toxicity...</div>
+        <div id="error" class="error"></div>
+        <div id="success" class="success"></div>
+        
+        <div id="result"></div>
+        <div id="plot"></div>
+    </div>
+
+    <script>
+        // Server and PubChem text is untrusted; escape before inserting into innerHTML.
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, ch => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+            ));
+        }
+
+        async function predict() {
+            const chemicalName = document.getElementById('chemical-name').value.trim();
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const success = document.getElementById('success');
+            const result = document.getElementById('result');
+            const plot = document.getElementById('plot');
+            
+            // Reset displays
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            success.style.display = 'none';
+            result.innerHTML = '';
+            plot.innerHTML = '';
+            
+            if (!chemicalName) {
+                error.textContent = 'Please enter a chemical name';
+                error.style.display = 'block';
+                loading.style.display = 'none';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ chemical_name: chemicalName })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    success.textContent = 'Analysis complete!';
+                    success.style.display = 'block';
+                    
+                    // Display basic results
+                    let resultHTML = `
+                        <div class="result-card">
+                            <h3>Analysis Results</h3>
+                            <p><strong>Chemical Name:</strong> ${escapeHtml(data.chemical_name)}</p>
+                            <div class="prediction-value">
+                                ${escapeHtml(data.message)}
+                            </div>
+                            <p><strong>SMILES Notation:</strong></p>
+                            <div class="smiles-notation">
+                                ${escapeHtml(data.smiles)}
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Add toxicity data if available
+                    if (data.toxicity_data) {
+                        if (data.toxicity_data.toxicity && data.toxicity_data.toxicity.length > 0) {
+                            resultHTML += `
+                                <div class="toxicity-section">
+                                    <h3>Toxicity Information</h3>
+                                    <div class="data-section">
+                                        ${data.toxicity_data.toxicity.map(item => `<p>• ${escapeHtml(item)}</p>`).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        if (data.toxicity_data.health_effects && data.toxicity_data.health_effects.length > 0) {
+                            resultHTML += `
+                                <div class="health-section">
+                                    <h3>Health Effects</h3>
+                                    <div class="data-section">
+                                        ${data.toxicity_data.health_effects.map(item => `<p>• ${escapeHtml(item)}</p>`).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        if (data.toxicity_data.safety_summary) {
+                            resultHTML += `
+                                <div class="safety-section">
+                                    <h3>Safety Summary</h3>
+                                    <div class="data-section">
+                                        <p>${escapeHtml(data.toxicity_data.safety_summary)}</p>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    }
+                    
+                    result.innerHTML = resultHTML;
+                    
+                    // Create plot
+                    const trace = {
+                        x: ['ATAD5 Stress Response'],
+                        y: [data.prediction],
+                        type: 'bar',
+                        marker: {
+                            color: '#3498db',
+                            line: {
+                                color: '#2980b9',
+                                width: 1.5
+                            }
+                        }
+                    };
+                    
+                    const layout = {
+                        title: 'ATAD5 Stress Response Prediction',
+                        yaxis: { 
+                            title: 'Probability (%)',
+                            range: [0, 100],
+                            tickformat: '.1f'
+                        },
+                        margin: { t: 40, l: 60, r: 40, b: 40 }
+                    };
+                    
+                    Plotly.newPlot('plot', [trace], layout);
+                    
+                } else {
+                    error.textContent = data.error || 'An error occurred during prediction';
+                    error.style.display = 'block';
+                }
+
+                // Scroll to results if successful
+                if (data.success) {
+                    result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+
+            } catch (err) {
+                console.error("Error:", err); // Debug log
+                error.textContent = 'An error occurred while connecting to the server';
+                error.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        // Add event listener for Enter key
+        document.getElementById('chemical-name').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                predict();
+            }
+        });
+    </script>
+    <h3>About ATAD5 and its relation to toxicity</h3>
+    <p>ATAD5 (ATPase family AAA domain-containing protein 5) plays a critical role in DNA replication and repair, particularly in maintaining genome stability</p>
+    <p>This protein is part of the Elg1 RFC-like complex and helps regulate the function of the DNA polymerase processivity factor PCNA by unloading it from DNA after replication</p>
+    <p>ATAD5 is involved in post-replication repair and helps in removing stalled replication forks.If a drug or chemical interferes with DNA replication, ATAD5 expression may increase as part of a stress response to represent the level of toxicity</p>
+    <p>Preclinical toxicity testing involves identifying drugs that cause genotoxic stress</p>
+    <p>Measuring ATAD5 stress responses can help predict long-term toxic effects of drugs or chemicals.</p>
+    <p>If a drug induces significant ATAD5 activity, it might require further assessment before moving to clinical trials.</p>
+    <p>If a compound activates ATAD5 too frequently, it might not be suitable for therapeutic use</p>
+    <p>Researchers may need to modify the chemical structure to reduce genotoxicity.</p>
+    <p>Thus stress response to ATAD5 represents mild to moderate DNA damage which makes it important for measuring the toxicity level and safety profile of different chemicals and drugs.</p>
+
+
+    <p>To know more about ATAD5 refer the given links below:</p>
+    <a href="https://www.genecards.org/cgi-bin/carddisp.pl?gene=ATAD5">Link 1</a>
+    <br>
+    <a href="https://www.proteinatlas.org/ENSG00000176208-ATAD5/summary/gene">Link 2</a>
+    <br>
+    <a href="https://www.ctdbase.com/detail.go?type=gene&acc=79915&view=ixn">Link 3</a>
+    <br>
+ </body>
+</html>
